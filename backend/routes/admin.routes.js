@@ -6,7 +6,10 @@ const {
     deleteQuestion,
     deleteAnswer,
     sendAnnouncement,
-    getStats
+    getStats,
+    getReports,
+    resolveReport,
+    dismissReport
 } = require('../controllers/admin.controller');
 const { protect, authorize } = require('../middlewares/auth.middleware');
 
@@ -19,5 +22,10 @@ router.delete('/questions/:id', deleteQuestion);
 router.delete('/answers/:id', deleteAnswer);
 router.post('/announcements', sendAnnouncement);
 router.get('/stats', getStats);
+
+// Reports routes
+router.get('/reports', getReports);
+router.put('/reports/:id/resolve', resolveReport);
+router.put('/reports/:id/dismiss', dismissReport);
 
 module.exports = router;

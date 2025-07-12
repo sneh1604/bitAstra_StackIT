@@ -9,17 +9,21 @@ const { createNotification } = require('../services/notification.service');
 // @access  Public
 exports.getQuestions = async (req, res, next) => {
     try {
+        console.log('getQuestions called with query:', req.query);
+        
         // Filtering
         let query;
         let queryStr = JSON.stringify(req.query);
         queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, match => `$${match}`);
-        query = Question.find(JSON.parse(queryStr)).populate('author', 'username avatar').populate('tags');
+        query = Question.find(JSON.parse(queryStr)).populate('author', 'username avatar reputation').populate('tags');
 
         // Sorting
         if (req.query.sort) {
             const sortBy = req.query.sort.split(',').join(' ');
+            console.log('Sorting by:', sortBy);
             query = query.sort(sortBy);
         } else {
+            console.log('Using default sort: -createdAt (newest first)');
             query = query.sort('-createdAt');
         }
 
@@ -30,10 +34,13 @@ exports.getQuestions = async (req, res, next) => {
         const endIndex = page * limit;
         const total = await Question.countDocuments();
 
+        console.log(`Pagination: page=${page}, limit=${limit}, total=${total}`);
+
         query = query.skip(startIndex).limit(limit);
 
         // Executing query
         const questions = await query;
+        console.log(`Found ${questions.length} questions`);
 
         // Pagination result
         const pagination = {};
@@ -51,6 +58,17 @@ exports.getQuestions = async (req, res, next) => {
             };
         }
 
+        // If no questions found, return empty array instead of error
+        if (questions.length === 0) {
+            console.log('No questions found in database');
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                pagination,
+                data: []
+            });
+        }
+
         res.status(200).json({
             success: true,
             count: questions.length,
@@ -58,6 +76,86 @@ exports.getQuestions = async (req, res, next) => {
             data: questions
         });
     } catch (error) {
+        console.error('Error in getQuestions:', error);
+        next(error);
+    }
+};
+
+// @desc    Create sample questions for testing
+// @route   POST /api/questions/sample
+// @access  Public
+exports.createSampleQuestions = async (req, res, next) => {
+    try {
+        const User = require('../models/User.model');
+        const Tag = require('../models/Tag.model');
+        
+        // Create sample user if not exists
+        let sampleUser = await User.findOne({ username: 'sampleuser' });
+        if (!sampleUser) {
+            sampleUser = await User.create({
+                username: 'sampleuser',
+                email: 'sample@example.com',
+                password: 'password123'
+            });
+        }
+
+        // Create sample tags if not exist
+        const tagNames = ['javascript', 'react', 'nodejs', 'python', 'mongodb'];
+        const tags = [];
+        for (const tagName of tagNames) {
+            let tag = await Tag.findOne({ name: tagName });
+            if (!tag) {
+                tag = await Tag.create({ name: tagName });
+            }
+            tags.push(tag._id);
+        }
+
+        // Sample questions
+        const sampleQuestions = [
+            {
+                title: 'How to use React hooks effectively?',
+                description: 'I\'m new to React and want to understand how to use hooks like useState and useEffect properly. Can someone explain with examples?',
+                author: sampleUser._id,
+                tags: [tags[1]], // react
+                views: 150,
+                votes: 5
+            },
+            {
+                title: 'MongoDB connection issues in Node.js',
+                description: 'I\'m having trouble connecting to MongoDB from my Node.js application. The connection keeps timing out. Here\'s my code...',
+                author: sampleUser._id,
+                tags: [tags[2], tags[4]], // nodejs, mongodb
+                views: 89,
+                votes: 3
+            },
+            {
+                title: 'JavaScript async/await best practices',
+                description: 'What are the best practices for using async/await in JavaScript? I want to avoid common pitfalls and write clean code.',
+                author: sampleUser._id,
+                tags: [tags[0]], // javascript
+                views: 234,
+                votes: 8
+            },
+            {
+                title: 'Python list comprehension vs for loops',
+                description: 'When should I use list comprehension vs traditional for loops in Python? Which is more readable and performant?',
+                author: sampleUser._id,
+                tags: [tags[3]], // python
+                views: 67,
+                votes: 2
+            }
+        ];
+
+        const createdQuestions = await Question.create(sampleQuestions);
+        console.log(`Created ${createdQuestions.length} sample questions`);
+
+        res.status(201).json({
+            success: true,
+            message: `Created ${createdQuestions.length} sample questions`,
+            data: createdQuestions
+        });
+    } catch (error) {
+        console.error('Error creating sample questions:', error);
         next(error);
     }
 };

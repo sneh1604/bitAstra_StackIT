@@ -1,7 +1,10 @@
 const User = require('../models/User.model');
 const Question = require('../models/Question.model');
 const Answer = require('../models/Answer.model');
+const Report = require('../models/Report.model');
+const Vote = require('../models/Vote.model');
 const Notification = require('../models/Notification.model');
+const Tag = require('../models/Tag.model');
 const { sendEmail } = require('../services/email.service');
 
 // @desc    Get all users
@@ -161,6 +164,76 @@ exports.getStats = async (req, res, next) => {
                 answers: answersCount,
                 tags: tagsCount
             }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Get all reports
+// @route   GET /api/admin/reports
+// @access  Private/Admin
+exports.getReports = async (req, res, next) => {
+    try {
+        const reports = await Report.find()
+            .populate('reporter', 'username avatar')
+            .populate('reportedItem')
+            .sort('-createdAt');
+
+        res.status(200).json({
+            success: true,
+            count: reports.length,
+            data: reports
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Resolve report
+// @route   PUT /api/admin/reports/:id/resolve
+// @access  Private/Admin
+exports.resolveReport = async (req, res, next) => {
+    try {
+        const report = await Report.findById(req.params.id);
+
+        if (!report) {
+            return res.status(404).json({ success: false, error: 'Report not found' });
+        }
+
+        report.status = 'resolved';
+        report.handledAt = new Date();
+        report.handledBy = req.user.id;
+        await report.save();
+
+        res.status(200).json({
+            success: true,
+            data: report
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Dismiss report
+// @route   PUT /api/admin/reports/:id/dismiss
+// @access  Private/Admin
+exports.dismissReport = async (req, res, next) => {
+    try {
+        const report = await Report.findById(req.params.id);
+
+        if (!report) {
+            return res.status(404).json({ success: false, error: 'Report not found' });
+        }
+
+        report.status = 'dismissed';
+        report.handledAt = new Date();
+        report.handledBy = req.user.id;
+        await report.save();
+
+        res.status(200).json({
+            success: true,
+            data: report
         });
     } catch (error) {
         next(error);
