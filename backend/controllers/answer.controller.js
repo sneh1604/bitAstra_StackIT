@@ -1,7 +1,7 @@
 const Answer = require('../models/Answer.model');
 const Question = require('../models/Question.model');
 const User = require('../models/User.model');
-const { createNotification } = require('../services/notification.service');
+const { createNotification, NotificationService } = require('../services/notification.service');
 
 // @desc    Get answers for a question
 // @route   GET /api/questions/:questionId/answers
@@ -42,15 +42,59 @@ exports.addAnswer = async (req, res, next) => {
         question.answers.push(answer._id);
         await question.save();
 
-        // Create notification for question author
+        // ===== ENHANCED NOTIFICATION AUTOMATION =====
+
+        // 1. Notify question author about new answer
         if (question.author.toString() !== req.user.id) {
-            await createNotification({
-                recipient: question.author,
-                sender: req.user.id,
-                type: 'answer',
+            await NotificationService.notifyQuestionAuthor(
+                question._id,
+                answer._id,
+                req.user.id
+            );
+        }
+
+        // 2. Check for mentions in the answer content
+        if (answer.content) {
+            await NotificationService.notifyMentionedUsers(
+                answer.content,
+                req.user.id,
+                question._id,
+                answer._id
+            );
+        }
+
+        // 3. Notify other answer authors (optional - creates discussion)
+        // This notifies other people who have answered the same question
+        const otherAnswers = await Answer.find({
+            question: question._id,
+            author: { $ne: req.user.id }
+        }).populate('author', 'username');
+
+        for (const otherAnswer of otherAnswers) {
+            // Only notify if they haven't been notified recently for this question
+            const recentNotification = await Notification.findOne({
+                recipient: otherAnswer.author._id,
                 question: question._id,
-                answer: answer._id
+                type: 'answer',
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Within last 24 hours
             });
+
+            if (!recentNotification) {
+                await createNotification({
+                    recipient: otherAnswer.author._id,
+                    sender: {
+                        _id: req.user.id,
+                        username: req.user.username
+                    },
+                    type: 'answer',
+                    question: question._id,
+                    answer: answer._id,
+                    metadata: {
+                        isFollowUpAnswer: true,
+                        originalAnswer: otherAnswer._id
+                    }
+                });
+            }
         }
 
         res.status(201).json({
@@ -156,16 +200,19 @@ exports.acceptAnswer = async (req, res, next) => {
         question.acceptedAnswer = answer._id;
         await question.save();
 
-        // Create notification for answer author
         if (answer.author.toString() !== req.user.id) {
-            await createNotification({
-                recipient: answer.author,
-                sender: req.user.id,
-                type: 'accept',
-                question: question._id,
-                answer: answer._id
-            });
+            await NotificationService.notifyAnswerAccepted(answer._id, req.user.id);
         }
+
+        // Give reputation bonus to answer author
+        await User.findByIdAndUpdate(answer.author, {
+            $inc: { reputation: 15 } // +15 reputation for accepted answer
+        });
+
+        // Give reputation bonus to question author for accepting
+        await User.findByIdAndUpdate(req.user.id, {
+            $inc: { reputation: 2 } // +2 reputation for accepting an answer
+        });
 
         res.status(200).json({
             success: true,
@@ -195,34 +242,49 @@ exports.addComment = async (req, res, next) => {
         answer.comments.push(comment);
         await answer.save();
 
-        // Create notification for answer author if commenter is not the author
-        if (answer.author.toString() !== req.user.id) {
-            await createNotification({
-                recipient: answer.author,
-                sender: req.user.id,
-                type: 'comment',
-                question: answer.question,
-                answer: answer._id,
-                comment: req.body.text
-            });
-        }
+        // // Create notification for answer author if commenter is not the author
+        // if (answer.author.toString() !== req.user.id) {
+        //     await createNotification({
+        //         recipient: answer.author,
+        //         sender: req.user.id,
+        //         type: 'comment',
+        //         question: answer.question,
+        //         answer: answer._id,
+        //         comment: req.body.text
+        //     });
+        // }
 
-        // Check for mentions (@username)
-        const mentionRegex = /@([a-zA-Z0-9_]+)/g;
-        let mentions;
-        while ((mentions = mentionRegex.exec(req.body.text)) !== null) {
-            const mentionedUser = await User.findOne({ username: mentions[1] });
-            if (mentionedUser && mentionedUser._id.toString() !== req.user.id) {
-                await createNotification({
-                    recipient: mentionedUser._id,
-                    sender: req.user.id,
-                    type: 'mention',
-                    question: answer.question,
-                    answer: answer._id,
-                    comment: req.body.text
-                });
-            }
-        }
+        // // Check for mentions (@username)
+        // const mentionRegex = /@([a-zA-Z0-9_]+)/g;
+        // let mentions;
+        // while ((mentions = mentionRegex.exec(req.body.text)) !== null) {
+        //     const mentionedUser = await User.findOne({ username: mentions[1] });
+        //     if (mentionedUser && mentionedUser._id.toString() !== req.user.id) {
+        //         await createNotification({
+        //             recipient: mentionedUser._id,
+        //             sender: req.user.id,
+        //             type: 'mention',
+        //             question: answer.question,
+        //             answer: answer._id,
+        //             comment: req.body.text
+        //         });
+        //     }
+        // }
+
+        await NotificationService.notifyCommentTarget(
+            targetId,
+            targetType,
+            req.user.id,
+            content
+        );
+
+        // Check for mentions in comment
+        await NotificationService.notifyMentionedUsers(
+            content,
+            req.user.id,
+            targetType === 'question' ? targetId : null,
+            targetType === 'answer' ? targetId : null
+        );
 
         res.status(201).json({
             success: true,

@@ -12,7 +12,7 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['answer', 'comment', 'mention', 'vote', 'accept', 'admin'],
+        enum: ['answer', 'comment', 'mention', 'vote', 'accept', 'admin', 'system'],
         required: true
     },
     question: {
@@ -26,6 +26,33 @@ const notificationSchema = new mongoose.Schema({
     comment: {
         type: String
     },
+    // Enhanced fields for admin/system notifications
+    title: {
+        type: String,
+        required: function () {
+            return this.type === 'admin' || this.type === 'system';
+        }
+    },
+    message: {
+        type: String,
+        required: function () {
+            return this.type === 'admin' || this.type === 'system';
+        }
+    },
+    // Priority for admin notifications
+    priority: {
+        type: String,
+        enum: ['low', 'medium', 'high', 'urgent'],
+        default: 'medium'
+    },
+    // Expiration for admin notifications
+    expiresAt: {
+        type: Date
+    },
+    // Metadata for different notification types
+    metadata: {
+        type: mongoose.Schema.Types.Mixed
+    },
     isRead: {
         type: Boolean,
         default: false
@@ -35,5 +62,10 @@ const notificationSchema = new mongoose.Schema({
         default: Date.now
     }
 });
+
+// Index for efficient querying
+notificationSchema.index({ recipient: 1, createdAt: -1 });
+notificationSchema.index({ recipient: 1, isRead: 1 });
+notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('Notification', notificationSchema);
